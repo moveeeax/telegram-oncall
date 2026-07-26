@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          check-latest: true
+          cache: true
+
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      # The README tells people to run these. If they stop working, CI fails.
+      - name: Smoke-test the documented examples
+        run: |
+          go run ./cmd/oncall validate -c examples/oncall.yaml
+          go run ./cmd/oncall whoison -c examples/oncall.yaml -at 2026-03-13T22:41:07Z
+          go run ./cmd/oncall route -c examples/oncall.yaml -f examples/alertmanager-firing.json \
+            -at 2026-03-13T22:41:07Z
+          go run ./cmd/oncall simulate -c examples/oncall.yaml -f examples/alertmanager-firing.json \
+            -ack-after 3m -ack-by bob -until 30m
