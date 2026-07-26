@@ -1,0 +1,31 @@
+# Binaries
+/oncall
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Go build & tooling caches
+/vendor/
+coverage.txt
+coverage.html
+
+# Local state written by `oncall simulate -db ...`
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Local configuration and anything holding a real bot token
+oncall.local.yaml
+.env
+.env.*
+*.local.yaml
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
