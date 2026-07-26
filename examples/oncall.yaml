@@ -1,0 +1,105 @@
+# Example telegram-oncall workspace.
+#
+# Every id below is an obvious placeholder. Real Telegram chat ids are negative
+# for groups and supergroups; real user ids are positive. Replace them with your
+# own before applying this anywhere.
+
+workspace: acme-sre
+timezone: Europe/Amsterdam
+
+targets:
+  - name: sre-group
+    type: group
+    chat_id: "-1000000000000" # placeholder supergroup id
+  - name: db-topic
+    type: topic
+    chat_id: "-1000000000000" # same supergroup ...
+    thread_id: 42             # ... but the "database" forum topic
+  - name: direct
+    type: dm
+
+responders:
+  - id: alice
+    name: Alice Ng
+    telegram_user_id: 100000001 # placeholder
+  - id: bob
+    name: Bob Iqbal
+    telegram_user_id: 100000002 # placeholder
+  - id: carol
+    name: Carol Sato
+    telegram_user_id: 100000003 # placeholder
+
+rotas:
+  - name: primary
+    rotation: weekly
+    handover_time: "10:00"
+    start_date: "2026-01-05" # a Monday
+    members: [alice, bob, carol]
+    overrides:
+      # "I'm covering tonight" — beats the computed rotation for this window.
+      - responder: carol
+        from: 2026-03-13T18:00:00Z
+        to: 2026-03-14T08:00:00Z
+        reason: alice at a wedding
+
+  - name: secondary
+    rotation: weekly
+    handover_time: "10:00"
+    start_date: "2026-01-05"
+    members: [carol, alice, bob] # offset by one, so primary != secondary
+
+escalations:
+  - name: standard
+    steps:
+      - notify: rota:primary
+        wait: 5m
+      - notify: rota:secondary
+        wait: 5m
+      - notify: target
+        mention: true
+
+  - name: db-fast
+    steps:
+      - notify: rota:primary
+        wait: 2m
+      - notify: target
+        mention: true
+
+routes:
+  - name: database
+    match:
+      labels:
+        team: db
+    target: db-topic
+    escalation: db-fast
+
+  - name: prod-paging
+    match:
+      severity: [critical, warning]
+      labels_re:
+        cluster: prod-.*
+    target: sre-group
+    escalation: standard
+
+  - name: catch-all
+    match: {}
+    target: sre-group
+    escalation: standard
+
+quiet_hours:
+  from: "23:00"
+  to: "08:00"
+  suppress: [info, warning]
+  breakthrough: [critical]
+
+heartbeats:
+  - name: nightly-backup
+    interval: 24h
+    grace: 30m
+    target: sre-group
+    escalation: standard
+    severity: critical
+
+dedup:
+  flap_window: 30m
+  flap_threshold: 5
