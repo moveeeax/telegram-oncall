@@ -1,0 +1,38 @@
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"PostgresReplicationLag\"}",
+  "truncatedAlerts": 0,
+  "status": "firing",
+  "receiver": "telegram-oncall",
+  "groupLabels": { "alertname": "PostgresReplicationLag" },
+  "commonLabels": {
+    "alertname": "PostgresReplicationLag",
+    "cluster": "prod-eu-1",
+    "severity": "critical",
+    "team": "db"
+  },
+  "commonAnnotations": {
+    "summary": "Postgres replica is 412s behind primary"
+  },
+  "externalURL": "https://alertmanager.example.invalid",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "PostgresReplicationLag",
+        "cluster": "prod-eu-1",
+        "instance": "pg-replica-2:9187",
+        "severity": "critical",
+        "team": "db"
+      },
+      "annotations": {
+        "summary": "Postgres replica is 412s behind primary",
+        "runbook_url": "https://runbooks.example.invalid/postgres-replication-lag"
+      },
+      "startsAt": "2026-03-13T22:41:07.000Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://prometheus.example.invalid/graph?g0.expr=pg_replication_lag",
+      "fingerprint": "9f2a1c4b7d8e0a31"
+    }
+  ]
+}

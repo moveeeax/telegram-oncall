@@ -1,0 +1,39 @@
+{
+  "receiver": "telegram-oncall",
+  "status": "firing",
+  "orgId": 1,
+  "truncatedAlerts": 0,
+  "title": "[FIRING:1] HighRequestLatency (prod-eu-1)",
+  "state": "alerting",
+  "message": "Value: 1.42s\nLabels:\n - alertname = HighRequestLatency",
+  "groupLabels": { "alertname": "HighRequestLatency" },
+  "commonLabels": {
+    "alertname": "HighRequestLatency",
+    "grafana_folder": "Platform",
+    "cluster": "prod-eu-1",
+    "severity": "warning"
+  },
+  "commonAnnotations": {
+    "summary": "p99 latency above 1s for 10 minutes"
+  },
+  "externalURL": "https://grafana.example.invalid",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "HighRequestLatency",
+        "grafana_folder": "Platform",
+        "cluster": "prod-eu-1",
+        "service": "checkout",
+        "severity": "warning"
+      },
+      "annotations": {
+        "summary": "p99 latency above 1s for 10 minutes"
+      },
+      "startsAt": "2026-03-13T22:44:00.000Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "https://grafana.example.invalid/alerting/grafana/abc123/view",
+      "fingerprint": "1a2b3c4d5e6f7081"
+    }
+  ]
+}

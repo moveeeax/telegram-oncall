@@ -1,0 +1,14 @@
+{
+  "status": "firing",
+  "title": "Backup job exited non-zero",
+  "severity": "critical",
+  "labels": {
+    "job": "nightly-backup",
+    "host": "backup-01"
+  },
+  "annotations": {
+    "summary": "restic exited 1: repository locked"
+  },
+  "starts_at": "2026-03-13T23:05:00Z",
+  "url": "https://ci.example.invalid/jobs/4412"
+}
