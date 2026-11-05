@@ -1,5 +1,9 @@
 # telegram-oncall
 
+[![ci](https://github.com/moveeeax/telegram-oncall/actions/workflows/ci.yml/badge.svg)](https://github.com/moveeeax/telegram-oncall/actions/workflows/ci.yml)
+[![Go 1.26+](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go)](go.mod)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 On-call rotas, escalation timers and acknowledgement, delivered to Telegram.
 
 Grafana OnCall was archived. PagerDuty starts at $21/user/month. A four-person
@@ -40,7 +44,7 @@ are required to run anything in this repo.** See
 
 ## Install
 
-Requires Go 1.24 or newer. The SQLite driver is pure Go, so there is no cgo and
+Requires Go 1.26 or newer (CI tests 1.26 and 1.27). The SQLite driver is pure Go, so there is no cgo and
 no system library to install.
 
 ```sh
@@ -231,7 +235,6 @@ gofmt -l .
 The test suite uses the same fixtures the README does, including the documented
 CLI output, so a change that breaks an example breaks the build.
 
-## Licence
+## License
 
-Not yet chosen. All rights reserved for now — get in touch if you want to use
-this.
+MIT. See [LICENSE](LICENSE).
