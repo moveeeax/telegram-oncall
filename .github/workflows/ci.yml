@@ -58,3 +58,12 @@ jobs:
             -at 2026-03-13T22:41:07Z
           go run ./cmd/oncall simulate -c examples/oncall.yaml -f examples/alertmanager-firing.json \
             -ack-after 3m -ack-by bob -until 30m
+          db="$RUNNER_TEMP/shift.db"
+          go run ./cmd/oncall simulate -c examples/oncall.yaml -until 30m -db "$db" \
+            -f examples/alertmanager-firing.json -ack-after 3m -ack-by bob
+          go run ./cmd/oncall simulate -c examples/oncall.yaml -until 30m -db "$db" \
+            -f examples/generic.json
+          go run ./cmd/oncall handoff -db "$db" -c examples/oncall.yaml -rota primary \
+            -until 2026-03-16T09:00:00Z
+          go run ./cmd/oncall handoff -db "$db" -c examples/oncall.yaml -rota primary \
+            -until 2026-03-16T09:00:00Z -format short

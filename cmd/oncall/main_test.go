@@ -135,3 +135,77 @@ func TestExportRequiresDB(t *testing.T) {
 		t.Fatal("expected an error when -db is missing")
 	}
 }
+
+// The README's handoff example: replay a night of incidents into one database,
+// then hand the primary rota over at the end of alice's week.
+func TestHandoffSummarisesASimulatedShift(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "shift.db")
+	for _, args := range [][]string{
+		{"-f", ex("alertmanager-firing.json"), "-ack-after", "3m", "-ack-by", "bob"},
+		{"-f", ex("alertmanager-resolved.json"), "-at", "2026-03-13T23:02:11Z"},
+		{"-f", ex("grafana-firing.json")},
+		{"-f", ex("generic.json")},
+		{"-f", ex("generic.json"), "-at", "2026-03-14T01:05:00Z"},
+	} {
+		capture(t, func() error {
+			return cmdSimulate(append([]string{"-c", ex("oncall.yaml"), "-until", "30m", "-db", db}, args...))
+		})
+	}
+
+	handoffArgs := []string{"-db", db, "-c", ex("oncall.yaml"), "-rota", "primary", "-until", "2026-03-16T09:00:00Z"}
+	md := capture(t, func() error { return cmdHandoff(handoffArgs) })
+	for _, want := range []string{
+		"Window: 2026-03-09T09:00:00Z to 2026-03-16T09:00:00Z (168h0m0s)",
+		"- primary: alice (Alice Ng) hands over to bob (Bob Iqbal)",
+		"| CRITICAL | restic exited 1: repository locked | catch-all | 1 | 2 | open |",
+		"| CRITICAL | Postgres replica is 412s behind primary | database | 1 | 1 | resolved |",
+		"| WARNING | p99 latency above 1s for 10 minutes | prod-paging | 1 | 1 | held |",
+		"- #3 CRITICAL restic exited 1: repository locked (route catch-all): NOT ACKED",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("missing %q in:\n%s", want, md)
+		}
+	}
+	if again := capture(t, func() error { return cmdHandoff(handoffArgs) }); again != md {
+		t.Errorf("handoff output is not stable across runs:\n%s\n---\n%s", md, again)
+	}
+
+	shortOut := capture(t, func() error { return cmdHandoff(append(handoffArgs, "-format", "short")) })
+	for _, want := range []string{
+		"primary: alice -> bob until 2026-03-23T09:00:00Z",
+		"Fired: 3 alert(s), 4 firing(s). Still live: 2. Acks: 1.",
+		"  2x CRITICAL restic exited 1: repository locked (open)",
+	} {
+		if !strings.Contains(shortOut, want) {
+			t.Errorf("missing %q in:\n%s", want, shortOut)
+		}
+	}
+
+	// A hand-set window that ends before the backup alert fired.
+	early := capture(t, func() error {
+		return cmdHandoff([]string{"-db", db, "-since", "2026-03-13T22:00:00Z", "-until", "2026-03-13T23:00:00Z"})
+	})
+	if strings.Contains(early, "restic") || !strings.Contains(early, "Postgres replica") {
+		t.Errorf("-since/-until window not applied:\n%s", early)
+	}
+	if !strings.Contains(early, "acked by bob") {
+		t.Errorf("at 23:00 the Postgres incident was acked and not yet resolved:\n%s", early)
+	}
+}
+
+func TestHandoffArgumentErrors(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "empty.db")
+	for name, args := range map[string][]string{
+		"no db":         {"-since", "2026-03-13T00:00:00Z"},
+		"no window":     {"-db", db},
+		"rota no cfg":   {"-db", db, "-rota", "primary"},
+		"bad format":    {"-db", db, "-since", "2026-03-13T00:00:00Z", "-format", "html"},
+		"bad since":     {"-db", db, "-since", "yesterday"},
+		"since > until": {"-db", db, "-since", "2026-03-14T00:00:00Z", "-until", "2026-03-13T00:00:00Z"},
+		"unknown rota":  {"-db", db, "-c", ex("oncall.yaml"), "-rota", "nope"},
+	} {
+		if err := cmdHandoff(args); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}

@@ -41,6 +41,9 @@ are required to run anything in this repo.** See
   complete even when the phone stays quiet.
 - **Heartbeats** — dead-man's switch endpoints. A cron that stops calling home
   pages the rota, once per outage.
+- **Shift handoff** — what fired in the shift with repeats collapsed, what is
+  still live at the handover, and overrides ahead, as Markdown for the wiki or
+  a short text for the group chat.
 
 ## Install
 
@@ -107,6 +110,100 @@ go run ./cmd/oncall simulate -c examples/oncall.yaml \
   -f examples/alertmanager-firing.json -db /tmp/incidents.db -until 30m
 go run ./cmd/oncall export -db /tmp/incidents.db -format csv
 ```
+
+### Hand the pager over
+
+`handoff` summarises a shift for the next person: what fired in the window,
+what is still live at the handover, and which manual overrides land in the
+incoming shift. Build a shift's worth of state first:
+
+```sh
+DB=/tmp/shift.db
+go run ./cmd/oncall simulate -c examples/oncall.yaml -until 30m -db $DB \
+  -f examples/alertmanager-firing.json -ack-after 3m -ack-by bob
+go run ./cmd/oncall simulate -c examples/oncall.yaml -until 30m -db $DB \
+  -f examples/alertmanager-resolved.json -at 2026-03-13T23:02:11Z
+go run ./cmd/oncall simulate -c examples/oncall.yaml -until 30m -db $DB \
+  -f examples/grafana-firing.json
+go run ./cmd/oncall simulate -c examples/oncall.yaml -until 30m -db $DB \
+  -f examples/generic.json
+go run ./cmd/oncall simulate -c examples/oncall.yaml -until 30m -db $DB \
+  -f examples/generic.json -at 2026-03-14T01:05:00Z
+```
+
+Then hand the `primary` rota over at the end of alice's week:
+
+```sh
+go run ./cmd/oncall handoff -db $DB -c examples/oncall.yaml -rota primary \
+  -until 2026-03-16T09:00:00Z
+```
+
+```markdown
+# On-call handoff: acme-sre
+
+Window: 2026-03-09T09:00:00Z to 2026-03-16T09:00:00Z (168h0m0s)
+
+## Rota
+
+- primary: alice (Alice Ng) hands over to bob (Bob Iqbal), on call until 2026-03-23T09:00:00Z [weekly rotation, period 10, member 2/3]
+
+## Summary
+
+2 opened, 1 held, 1 deduped, 2 page(s), 3 escalation(s), 1 ack(s), 1 resolve(s)
+
+## Fired in window
+
+| Severity | Alert | Route | Incidents | Firings | Status at handoff |
+| --- | --- | --- | ---: | ---: | --- |
+| CRITICAL | restic exited 1: repository locked | catch-all | 1 | 2 | open |
+| CRITICAL | Postgres replica is 412s behind primary | database | 1 | 1 | resolved |
+| WARNING | p99 latency above 1s for 10 minutes | prod-paging | 1 | 1 | held |
+
+## Still live at handoff
+
+- #2 WARNING p99 latency above 1s for 10 minutes (route prod-paging): held since 2026-03-13T22:44:00Z: quiet hours 23:00-08:00 Europe/Amsterdam suppress severity "warning"
+- #3 CRITICAL restic exited 1: repository locked (route catch-all): NOT ACKED, open since 2026-03-13T23:05:00Z
+
+## Overrides for the incoming shift
+
+None.
+```
+
+`-format short` prints plain text sized for one Telegram message (at most 10
+live incidents and the 5 noisiest alerts, the rest counted as `+N more`):
+
+```text
+Handoff acme-sre 2026-03-09T09:00:00Z to 2026-03-16T09:00:00Z
+primary: alice -> bob until 2026-03-23T09:00:00Z
+Fired: 3 alert(s), 4 firing(s). Still live: 2. Acks: 1.
+Live:
+  #2 WARNING p99 latency above 1s for 10 minutes (held since 2026-03-13T22:44:00Z: quiet hours 23:00-08:00 Europe/Amsterdam suppress severity "warning")
+  #3 CRITICAL restic exited 1: repository locked (NOT ACKED, open since 2026-03-13T23:05:00Z)
+Fired:
+  2x CRITICAL restic exited 1: repository locked (open)
+  1x CRITICAL Postgres replica is 412s behind primary (resolved)
+  1x WARNING p99 latency above 1s for 10 minutes (held)
+```
+
+How the window and the sections are computed:
+
+- With `-rota`, the window runs from the start of the shift that was running
+  just before `-until` up to `-until`, so `-until` at the exact handover gives
+  the shift being handed over. For an off-cycle handoff set `-since` (and
+  `-until`, default `now`) by hand; `-c` and `-rota` are then optional.
+- The window is half-open, `[since, until)`. Every firing of one alert on one
+  route collapses into one row: `Incidents` counts distinct incidents (a
+  re-fire after resolve opens a new one), `Firings` counts open, held and dedup
+  events inside the window.
+- "Still live" lists every incident created before `-until` and not resolved
+  by then, including ones that started in an earlier shift. Status is rebuilt
+  from the ack and resolve timestamps, so a handoff for a past window does not
+  change when someone acks later.
+- Nothing in the output depends on the wall clock, so the same window prints
+  the same bytes and two consecutive handoffs diff line by line.
+
+`handoff` only prints. Posting it to a chat waits for the Telegram transport
+(see [Scope](#scope-what-is-and-is-not-here)).
 
 ### Ask who is carrying the pager
 
@@ -206,6 +303,8 @@ Present and working, entirely offline:
 - alert ingest and normalisation, routing, dedup, flap suppression
 - rota resolution with overrides and DST-stable handover
 - the durable escalation state machine, ack/resolve, the audit ledger
+- shift handoff summaries from the incident store, as Markdown or a short
+  Telegram-sized text
 - quiet hours, heartbeat expiry
 - the `oncall` CLI and its test suite
 
