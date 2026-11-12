@@ -1,7 +1,7 @@
 // Command oncall is the offline control surface for a telegram-oncall
 // workspace: validate the config, ask who is on call, dry-run routing for a
 // real alert payload, replay a whole incident through the escalation state
-// machine, and export the acknowledgement ledger.
+// machine, export the acknowledgement ledger, and write the shift handoff.
 //
 // Nothing in this binary talks to Telegram, so none of it needs a bot token.
 package main
@@ -20,6 +20,7 @@ import (
 	"github.com/moveeeax/telegram-oncall/internal/clock"
 	"github.com/moveeeax/telegram-oncall/internal/config"
 	"github.com/moveeeax/telegram-oncall/internal/escalate"
+	"github.com/moveeeax/telegram-oncall/internal/handoff"
 	"github.com/moveeeax/telegram-oncall/internal/ingest"
 	"github.com/moveeeax/telegram-oncall/internal/notify"
 	"github.com/moveeeax/telegram-oncall/internal/rota"
@@ -35,6 +36,7 @@ Usage:
   oncall route     -c CONFIG -f PAYLOAD [-source alertmanager|grafana|generic] [-at RFC3339]
   oncall simulate  -c CONFIG -f PAYLOAD [-ack-after 7m] [-ack-by alice] [-until 1h] [-db FILE]
   oncall export    -db FILE [-format csv|json]
+  oncall handoff   -db FILE [-c CONFIG] [-rota NAME] [-since RFC3339] [-until RFC3339|now] [-format markdown|short]
 
 Commands:
   validate  parse the YAML workspace and report every problem at once
@@ -42,6 +44,7 @@ Commands:
   route     show which route, target and escalation an alert payload lands on
   simulate  replay an alert through the escalation state machine on a fake clock
   export    dump the acknowledgement ledger from a database written by simulate
+  handoff   summarise a shift: what fired, what is still live, overrides ahead
 `
 
 func main() {
@@ -61,6 +64,8 @@ func main() {
 		err = cmdSimulate(os.Args[2:])
 	case "export":
 		err = cmdExport(os.Args[2:])
+	case "handoff":
+		err = cmdHandoff(os.Args[2:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return
@@ -426,6 +431,72 @@ func cmdExport(args []string) error {
 	default:
 		return fmt.Errorf("export: unknown format %q", *format)
 	}
+}
+
+func cmdHandoff(args []string) error {
+	fs := flag.NewFlagSet("handoff", flag.ExitOnError)
+	dbPath := fs.String("db", "", "SQLite file to read")
+	path := fs.String("c", "", "workspace YAML; adds the rota and override sections")
+	rotaName := fs.String("rota", "", "rota whose shift ends at -until; sets the window when -since is empty")
+	sinceStr := fs.String("since", "", "RFC3339 window start (default: start of the -rota shift)")
+	untilStr := fs.String("until", "now", "RFC3339 window end, or now")
+	format := fs.String("format", "markdown", "markdown or short")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *dbPath == "" {
+		return fmt.Errorf("handoff: -db is required")
+	}
+	if *format != "markdown" && *format != "short" {
+		return fmt.Errorf("handoff: unknown format %q", *format)
+	}
+	if *rotaName != "" && *path == "" {
+		return fmt.Errorf("handoff: -rota needs -c CONFIG")
+	}
+	var cfg *config.Config
+	if *path != "" {
+		var err error
+		if cfg, err = config.Load(*path); err != nil {
+			return err
+		}
+	}
+	until := time.Now().UTC()
+	if *untilStr != "now" {
+		var err error
+		if until, err = parseAt(*untilStr); err != nil {
+			return err
+		}
+	}
+	var win handoff.Window
+	switch {
+	case *sinceStr != "":
+		since, err := parseAt(*sinceStr)
+		if err != nil {
+			return err
+		}
+		win = handoff.Window{Since: since, Until: until}
+	case *rotaName != "":
+		var err error
+		if win, err = handoff.ShiftWindow(cfg, *rotaName, until); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("handoff: set -since, or -c and -rota to take the window from the rota")
+	}
+
+	st, err := store.Open(*dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	rep, err := handoff.Build(context.Background(), st, handoff.Options{Config: cfg, Rota: *rotaName, Window: win})
+	if err != nil {
+		return err
+	}
+	if *format == "short" {
+		return handoff.Short(os.Stdout, rep)
+	}
+	return handoff.Markdown(os.Stdout, rep)
 }
 
 func loadConfigAndAlerts(cfgPath, payload, source, atStr string) (*config.Config, []ingest.Alert, time.Time, error) {

@@ -320,6 +320,28 @@ func (s *Store) ListIncidents(ctx context.Context, status Status) ([]Incident, e
 	return out, rows.Err()
 }
 
+// IncidentsLiveAt returns every incident that existed at t and was not yet
+// resolved by then, oldest first. "At t" is half-open: an incident created at
+// exactly t, or resolved at exactly t, belongs to whoever is on call from t.
+func (s *Store) IncidentsLiveAt(ctx context.Context, t time.Time) ([]Incident, error) {
+	rows, err := s.db.QueryContext(ctx, incidentCols+`
+		WHERE created_at < ? AND (resolved_at IS NULL OR resolved_at >= ?)
+		ORDER BY created_at, id`, unix(t), unix(t))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Incident
+	for rows.Next() {
+		inc, err := scanIncident(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, inc)
+	}
+	return out, rows.Err()
+}
+
 // ScheduleTimer records a durable escalation timer. It is idempotent per
 // (incident, step), so a retried Tick cannot double-schedule.
 func (s *Store) ScheduleTimer(ctx context.Context, incidentID int64, step int, fireAt time.Time) error {
@@ -462,6 +484,29 @@ func (s *Store) Ledger(ctx context.Context, incidentID int64) ([]LedgerEntry, er
 	}
 	q += ` ORDER BY at, id`
 	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LedgerEntry
+	for rows.Next() {
+		var e LedgerEntry
+		var at int64
+		if err := rows.Scan(&e.ID, &e.IncidentID, &at, &e.Actor, &e.Action, &e.Detail); err != nil {
+			return nil, err
+		}
+		e.At = time.Unix(at, 0).UTC()
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// LedgerBetween returns audit rows for every incident with since <= at < until,
+// oldest first.
+func (s *Store) LedgerBetween(ctx context.Context, since, until time.Time) ([]LedgerEntry, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, incident_id, at, actor, action, detail FROM ledger
+		 WHERE at >= ? AND at < ? ORDER BY at, id`, unix(since), unix(until))
 	if err != nil {
 		return nil, err
 	}

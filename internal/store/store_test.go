@@ -232,3 +232,59 @@ func TestIncidentNotFound(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestIncidentsLiveAtIsHalfOpen(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	mk := func(fp string, at time.Time) Incident {
+		inc, _, err := s.CreateIncident(ctx, Incident{
+			Fingerprint: fp, Route: "r", Escalation: "std", Target: "g",
+			Title: fp, Severity: "critical", Status: StatusOpen, CreatedAt: at,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return inc
+	}
+	cut := now.Add(time.Hour)
+	resolvedBefore := mk("resolved-before", now)
+	resolvedAtCut := mk("resolved-at-cut", now)
+	stillOpen := mk("still-open", now.Add(time.Minute))
+	mk("created-at-cut", cut)
+	if _, err := s.Resolve(ctx, resolvedBefore.ID, "alice", cut.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Resolve(ctx, resolvedAtCut.ID, "alice", cut); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.IncidentsLiveAt(ctx, cut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for _, inc := range got {
+		ids = append(ids, inc.ID)
+	}
+	if len(ids) != 2 || ids[0] != resolvedAtCut.ID || ids[1] != stillOpen.ID {
+		t.Fatalf("live at cut = %v, want [%d %d]", ids, resolvedAtCut.ID, stillOpen.ID)
+	}
+}
+
+func TestLedgerBetweenIsHalfOpen(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	inc := newIncident(t, s, "fp", "r")
+	for i, action := range []string{"open", "page", "ack", "resolve"} {
+		if err := s.AppendLedger(ctx, inc.ID, now.Add(time.Duration(i)*time.Minute), "system", action, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.LedgerBetween(ctx, now.Add(time.Minute), now.Add(3*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Action != "page" || got[1].Action != "ack" {
+		t.Fatalf("ledger between = %+v, want page and ack", got)
+	}
+}
